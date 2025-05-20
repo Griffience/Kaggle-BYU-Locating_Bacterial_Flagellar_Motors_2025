@@ -1,3 +1,5 @@
+# *该版本由于作者资源有限，用笔记本跑的，所以各个参数配置适用于笔记本，故而若需要参考请自行更改数据路径以及参数配置*   
+
 训练 YOLOv8 模型脚本   
 使用方法: python train_yolo.py   
 前提：已安装 ultralytics（pip install ultralytics）和其他依赖  
