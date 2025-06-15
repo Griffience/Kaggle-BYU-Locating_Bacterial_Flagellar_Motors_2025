@@ -1,0 +1,6 @@
+pillow
+transformers
+timm
+tqdm
+pycocotools
+scikit-learn
