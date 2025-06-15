@@ -1,21 +1,19 @@
-# pretrain.py
-# =============================================================================
-# 该脚本完成：
-#   1) 从 Kaggle 原始数据：train/ + train_labels.csv → 构建 YOLOv8n/DETR 用的 yolo_dataset/
-#   2) 在 yolo_dataset 上对 YOLOv8n 做“较强增强的预训练” → 输出 ./yolo_weights_pretrain/yolov8n/weights/best.pt
-#   3) 在 yolo_dataset 上对 DETR(ResNet-50) 做“较强增强的预训练” → 输出 ./detr_weights_pretrain/checkpoint-last/
-#
-# 运行：
-#   python pretrain.py
-#
-# 输出示例：
-#   ./yolo_dataset/             （生成的数据集目录）
-#   ./yolo_weights_pretrain/
-#       └─ yolov8n/
-#            └─ weights/best.pt
-#   ./detr_weights_pretrain/
-#       └─ checkpoint-last/      （HuggingFace DETR 微调权重）
-# =============================================================================
+#pretrain.py
+'''
+从Kaggle原始数据：train/ + train_labels.csv → 构建 YOLOv8n/DETR 用的 yolo_dataset/
+在yolo_dataset上对YOLOv8n做“较强增强的预训练” → 输出 ./yolo_weights_pretrain/yolov8n/weights/best.pt
+在yolo_dataset上对DETR(ResNet-50)做“较强增强的预训练” → 输出 ./detr_weights_pretrain/checkpoint-last/
+运行：
+python pretrain.py
+输出示例：
+   ./yolo_dataset/             
+   ./yolo_weights_pretrain/
+       └─ yolov8n/
+            └─ weights/best.pt
+   ./detr_weights_pretrain/
+       └─ checkpoint-last/      （HuggingFace DETR 微调权重）
+'''
+
 
 import os
 import random
@@ -38,37 +36,37 @@ warnings.filterwarnings(
 
 
 
-# HuggingFace DETR 相关
+#HuggingFace DETR相关
 from transformers import DetrForObjectDetection, DetrImageProcessor
 from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms.functional import to_tensor, resize
 
-# ------------- 1. 全局配置 -------------
+#全局配置
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"[DEVICE] Using device: {device}")
 
-# Kaggle 原始目录（仅含 train/, test/, train_labels.csv, sample_submission.csv）
-RAW_DATA_DIR     = "./data"
-RAW_TRAIN_DIR    = os.path.join(RAW_DATA_DIR, "train")       # 含 tomo_id 子目录
-RAW_TEST_DIR     = os.path.join(RAW_DATA_DIR, "test")
-RAW_LABELS_CSV   = os.path.join(RAW_DATA_DIR, "train_labels.csv")
+#Kaggle原始目录
+RAW_DATA_DIR  = "./data"
+RAW_TRAIN_DIR = os.path.join(RAW_DATA_DIR, "train")  #含tomo_id子目录
+RAW_TEST_DIR = os.path.join(RAW_DATA_DIR, "test")
+RAW_LABELS_CSV = os.path.join(RAW_DATA_DIR, "train_labels.csv")
 
-# 我们要生成的 yolo_dataset 目录
+#要生成的yolo_dataset目录
 YOLO_DATASET_DIR = os.path.join(os.getcwd(), "yolo_dataset")
 
-# 预训练输出目录
+#预训练输出目录
 YOLO_PRETRAIN_DIR = os.path.join(os.getcwd(), "yolo_weights_pretrain")
 DETR_PRETRAIN_DIR = os.path.join(os.getcwd(), "detr_weights_pretrain")
 
-# YOLOv8n 预训练用预训练权重 (需提前把 yolov8n.pt 放在工作目录下)
+#YOLOv8n预训练用预训练权重 (需提前把 yolov8n.pt 放在工作目录下)
 YOLO_PRETRAIN_WEIGHTS = "yolov8n.pt"
 
-# —— YOLOv8n 预训练 超参 —— #
-YOLO_PRE_EPOCHS    = 50
-YOLO_PRE_BATCH     = 16
-YOLO_PRE_IMGSZ     = 640
-YOLO_PRE_PATIENCE  = 7
-YOLO_PRE_LR0       = 0.01
+#YOLOv8n预训练超参
+YOLO_PRE_EPOCHS = 50
+YOLO_PRE_BATCH = 16
+YOLO_PRE_IMGSZ = 640
+YOLO_PRE_PATIENCE = 7
+YOLO_PRE_LR0  = 0.01
 
 YOLO_PRE_MOSAIC    = 0.7
 YOLO_PRE_MIXUP     = 0.3
@@ -83,13 +81,13 @@ YOLO_PRE_HSV_H     = 0.015
 YOLO_PRE_HSV_S     = 0.7
 YOLO_PRE_HSV_V     = 0.4
 
-# —— DETR 预训练 超参 —— #
+#DETR预训练超参
 DETR_PRE_EPOCHS    = 20
 DETR_PRE_BATCH     = 4
 DETR_PRE_LR        = 1e-4
 DETR_IMAGE_SIZE    = 800
 
-# ------------- 2. 从原始数据构建 yolo_dataset -------------
+#从原始数据构建yolo_dataset
 def build_yolo_dataset(raw_train_dir, labels_csv, out_dir, val_split=0.2, trust=4, box_size=24):
     """
     从 Kaggle 原始的 train/<tomo_id>/<slice>.jpg + train_labels.csv
@@ -104,7 +102,7 @@ def build_yolo_dataset(raw_train_dir, labels_csv, out_dir, val_split=0.2, trust=
       - 只生成含 motor 的 slice；未包含 motor 的 slice 不生成。
     """
 
-    # 1) 读取 CSV，按 tomo_id 分组
+    #读取 CSV，按 tomo_id 分组
     df = pd.read_csv(labels_csv)
     df = df.dropna(subset=["Motor axis 0", "Motor axis 1", "Motor axis 2"])
     # 先筛出有 motor 的 tomogram
@@ -114,7 +112,7 @@ def build_yolo_dataset(raw_train_dir, labels_csv, out_dir, val_split=0.2, trust=
     train_tomos = set(tomo_with_motor[:split])
     val_tomos   = set(tomo_with_motor[split:])
 
-    # 2) 创建目录
+    #创建目录
     img_tr_dir = os.path.join(out_dir, "images", "train")
     lbl_tr_dir = os.path.join(out_dir, "labels", "train")
     img_va_dir = os.path.join(out_dir, "images", "val")
@@ -122,19 +120,19 @@ def build_yolo_dataset(raw_train_dir, labels_csv, out_dir, val_split=0.2, trust=
     for d in [img_tr_dir, lbl_tr_dir, img_va_dir, lbl_va_dir]:
         os.makedirs(d, exist_ok=True)
 
-    # 3) 遍历每个 tomo_id 的所有 motor
+    #遍历每个 tomo_id 的所有 motor
     counts = {"train": 0, "val": 0}
     for idx, row in df.iterrows():
         tomo_id = row["tomo_id"]
         zc = int(round(row["Motor axis 0"]))
         yc = int(round(row["Motor axis 1"]))
         xc = int(round(row["Motor axis 2"]))
-        # 当前 tomo 子目录
+        # 当前 tomo子目录
         tomo_dir = os.path.join(raw_train_dir, tomo_id)
         if not os.path.isdir(tomo_dir):
             continue
 
-        # 把 (zc-trust) ~ (zc+trust) 的 slice 都生成 VOYOLO 格式
+        #把(zc-trust) ~ (zc+trust) 的 slice 都生成 VOYOLO 格式
         for z in range(zc - trust, zc + trust + 1):
             if z < 0:
                 continue
@@ -143,17 +141,17 @@ def build_yolo_dataset(raw_train_dir, labels_csv, out_dir, val_split=0.2, trust=
             if not os.path.exists(src_img):
                 continue
 
-            # 读取 slice 大小
+            #读取 slice 大小
             img = Image.open(src_img)
             w, h = img.size
 
-            # 归一化 YOLO: x_center_norm, y_center_norm, bw_norm, bh_norm
+            #归一化 YOLO: x_center_norm, y_center_norm, bw_norm, bh_norm
             x_center_norm = xc / w
             y_center_norm = yc / h
             bw_norm = box_size / w
             bh_norm = box_size / h
 
-            # 新文件名格式：{tomo_id}_z{z:04d}_y{yc:04d}_x{xc:04d}.jpg
+            #新文件名格式：{tomo_id}_z{z:04d}_y{yc:04d}_x{xc:04d}.jpg
             new_fn = f"{tomo_id}_z{z:04d}_y{yc:04d}_x{xc:04d}.jpg"
             if tomo_id in train_tomos:
                 dst_img = os.path.join(img_tr_dir, new_fn)
@@ -164,16 +162,16 @@ def build_yolo_dataset(raw_train_dir, labels_csv, out_dir, val_split=0.2, trust=
                 dst_lbl = os.path.join(lbl_va_dir, new_fn.replace(".jpg", ".txt"))
                 counts["val"] += 1
 
-            # 复制图片
+            #复制图片
             shutil.copy(src_img, dst_img)
-            # 写 label
+            #写 label
             with open(dst_lbl, "w") as f:
                 # 0 表示 “motor” 类
                 f.write(f"0 {x_center_norm:.6f} {y_center_norm:.6f} {bw_norm:.6f} {bh_norm:.6f}\n")
 
     print(f"[BUILD] YOLO Dataset built: train_count={counts['train']}, val_count={counts['val']}")
 
-    # 4) 生成 dataset.yaml
+    #生成 dataset.yaml
     yaml_dict = {
         "path": out_dir,
         "train": "images/train",
@@ -185,7 +183,7 @@ def build_yolo_dataset(raw_train_dir, labels_csv, out_dir, val_split=0.2, trust=
     print(f"[BUILD] dataset.yaml saved ← {out_dir}/dataset.yaml")
 
 
-# ------------- 3. YOLOv8n 预训练 -------------
+#YOLOv8n 预训练
 def train_yolov8n_pretrain(yaml_path, weights, save_dir):
     """
     从预训练权重加载 YOLOv8n，然后在 yolo_dataset 上用较强增强做 50 轮预训练
@@ -265,9 +263,8 @@ def get_num_labels(label_dir: str) -> int:
 
     return max_id + 1 if max_id >= 0 else 0
 
-# ============================================
-# 1) Helper: 把 YOLO (x_center_norm, y_center_norm, w_norm, h_norm) 转为 [x_min, y_min, w, h]（像素）
-# ============================================
+
+#Helper: 把 YOLO (x_center_norm, y_center_norm, w_norm, h_norm) 转为 [x_min, y_min, w, h]（像素）
 def yolo_to_detr_boxes(yolo_txt_path: str, img_width: int, img_height: int):
     boxes = []
     labels = []
@@ -290,7 +287,7 @@ def yolo_to_detr_boxes(yolo_txt_path: str, img_width: int, img_height: int):
             x_min = x_center - w_box / 2
             y_min = y_center - h_box / 2
 
-            # 防止越界
+            #防止越界
             x_min = max(0, x_min)
             y_min = max(0, y_min)
             w_box = min(w_box, img_width - x_min)
@@ -300,9 +297,8 @@ def yolo_to_detr_boxes(yolo_txt_path: str, img_width: int, img_height: int):
             labels.append(cls_id)
     return boxes, labels
 
-# ============================================
-# 2) Dataset: 递归读取 yolo_dataset 下的 images 和 labels
-# ============================================
+
+#Dataset: 递归读取 yolo_dataset 下的images和 labels
 class YoloToDetrDataset(Dataset):
     def __init__(self, img_dir: str, label_dir: str, img_extensions=(".jpg", ".jpeg", ".png", ".bmp"), transforms=None):
         super().__init__()
@@ -310,7 +306,7 @@ class YoloToDetrDataset(Dataset):
         self.label_dir = label_dir
         self.transforms = transforms
 
-        # 收集所有图片路径
+        #收集所有图片路径
         self.image_paths = []
         for ext in img_extensions:
             pattern = os.path.join(self.img_dir, "**", f"*{ext}")
@@ -328,14 +324,14 @@ class YoloToDetrDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
         img_width, img_height = image.size
 
-        # 生成对应的 YOLO .txt 路径
-        rel = os.path.relpath(img_path, self.img_dir)           # e.g. "0001.jpg" 或 "subdir/0001.jpg"
+        #生成对应的 YOLO .txt 路径
+        rel = os.path.relpath(img_path, self.img_dir)    # e.g. "0001.jpg" 或 "subdir/0001.jpg"
         base = os.path.splitext(rel)[0]
         yolo_txt = os.path.join(self.label_dir, base + ".txt")
 
         if os.path.exists(yolo_txt):
             boxes, labels = yolo_to_detr_boxes(yolo_txt, img_width, img_height)
-            boxes_tensor = torch.as_tensor(boxes, dtype=torch.float32)   # [num_obj,4]
+            boxes_tensor = torch.as_tensor(boxes, dtype=torch.float32)  # [num_obj,4]
             labels_tensor = torch.as_tensor(labels, dtype=torch.int64)   # [num_obj]
         else:
             boxes_tensor = torch.zeros((0, 4), dtype=torch.float32)
@@ -347,9 +343,8 @@ class YoloToDetrDataset(Dataset):
         target = {"boxes": boxes_tensor, "labels": labels_tensor}
         return image, target
 
-# ============================================
-# 3) Collate 函数：把一个 batch 的 PIL.Image + YOLO label 转为 DETR 所需的格式
-# ============================================
+
+#Collate 函数：把一个 batch 的 PIL.Image + YOLO label 转为 DETR 所需的格式
 def detr_collate_fn(batch, processor: DetrImageProcessor):
     images = []
     coco_annotations = []
@@ -378,15 +373,14 @@ def detr_collate_fn(batch, processor: DetrImageProcessor):
 
     return pixel_values, labels_for_detr
 
-# ============================================
-# 4) 构造 COCO-格式的 GT annotations（供 COCOeval 用）
-# ============================================
+
+#构造 COCO-格式的 GT annotations（供 COCOeval 用）
 def build_coco_gt_annotations(dataset: YoloToDetrDataset):
     coco_gt = {"images": [], "annotations": [], "categories": []}
     ann_id = 1
     cat_ids = set()
 
-    # 收集所有类别 ID
+    #收集所有类别 ID
     for img_path in dataset.image_paths:
         rel = os.path.relpath(img_path, dataset.img_dir)
         base = os.path.splitext(rel)[0]
@@ -401,11 +395,11 @@ def build_coco_gt_annotations(dataset: YoloToDetrDataset):
                 cid = int(parts[0])
                 cat_ids.add(cid)
 
-    # 填 categories
+    #填categories
     for cid in sorted(cat_ids):
         coco_gt["categories"].append({"id": cid, "name": str(cid)})
 
-    # 填 images + annotations
+    #填images + annotations
     img_id_counter = 1
     for img_path in dataset.image_paths:
         rel = os.path.relpath(img_path, dataset.img_dir).replace("\\", "/")
@@ -459,9 +453,8 @@ def build_coco_gt_annotations(dataset: YoloToDetrDataset):
 
     return coco_gt
 
-# ============================================
-# 5) 后处理：把 DETR 输出转为 COCOeval 需要的 List[dict]
-# ============================================ 
+
+#后处理：把 DETR 输出转为 COCOeval 需要的 List[dict]
 def postprocess_predictions(outputs, image_ids, orig_sizes, processor: DetrImageProcessor):
     """
     outputs: DetrForObjectDetectionOutput
@@ -503,9 +496,8 @@ def postprocess_predictions(outputs, image_ids, orig_sizes, processor: DetrImage
 
     return results
 
-# ============================================
-# 6) 训练函数：train_detr_pretrain（含实时 mAP 以及 (H,W) 修正）
-# ============================================
+
+#训练函数：train_detr_pretrain（含实时 mAP 以及 (H,W) 修正）
 def train_detr_pretrain(
     img_dir: str,
     label_dir: str,
@@ -526,18 +518,16 @@ def train_detr_pretrain(
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # ---------- Step A: 计算类别数 ----------
     num_labels = get_num_labels(label_dir := label_dir)
     if num_labels <= 0:
         raise ValueError(f"[ERROR] 在 {label_dir} 下没有任何 .txt 标注，无法计算 num_labels。")
     print(f"[INFO] Detected {num_labels} class IDs (0-based).")
 
-    # ---------- Step B: 初始化 DETR 模型 & Processor ----------
     print("[INFO] Loading DetrImageProcessor and DetrForObjectDetection...")
     processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
     model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
 
-    # 替换分类头为 (num_labels + 1)
+    #替换分类头为 (num_labels + 1)
     model.config.num_labels = num_labels
     in_feat = model.class_labels_classifier.in_features
     model.class_labels_classifier = torch.nn.Linear(in_feat, num_labels + 1)
@@ -547,7 +537,6 @@ def train_detr_pretrain(
     model.to(device)
     print(f"[INFO] Model moved to device = {device}.")
 
-    # ---------- Step C: 构造 Dataset & DataLoader ----------
     pil_transforms = None
     train_img_dir = os.path.join(img_dir, "train")
     train_lbl_dir = os.path.join(label_dir, "train")
@@ -573,7 +562,6 @@ def train_detr_pretrain(
     )
     print(f"[INFO] Created DataLoaders. #train = {len(train_dataset)}, #val = {len(val_dataset)}, batch_size = {batch_size}")
 
-    # ---------- Step D: 构造 COCO GT for 验证集 ----------
     print("[INFO] Building COCO-style GT for validation set ...")
     coco_gt_dict = build_coco_gt_annotations(val_dataset)
     # 补充 'info' 和 'licenses' 字段，避免 loadRes 报 KeyError
@@ -583,19 +571,17 @@ def train_detr_pretrain(
     coco_gt.dataset = coco_gt_dict
     coco_gt.createIndex()
 
-    # ---------- Step E: 优化器 ----------
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     print(f"[INFO] Optimizer: AdamW, lr = {learning_rate}")
 
-    # ---------- Step F: 训练 + 验证 循环（含实时 mAP@0.5:0.95） ----------
-    # 先构造 val_img_id_list 与 val_img_size_list，注意 val_img_size_list 存 (height, width)
+    #先构造 val_img_id_list 与 val_img_size_list，注意 val_img_size_list 存 (height, width)
     val_img_id_list = []
     val_img_size_list = []
     for idx, img_path in enumerate(val_dataset.image_paths):
         image = Image.open(img_path)
         w, h = image.size
-        val_img_id_list.append(idx + 1)      # image_id 从 1 开始
-        val_img_size_list.append((h, w))    # **(height, width)**
+        val_img_id_list.append(idx + 1)      #image_id 从 1 开始
+        val_img_size_list.append((h, w))    #(height, width)
 
     for epoch in range(1, num_epochs + 1):
         model.train()
@@ -614,7 +600,6 @@ def train_detr_pretrain(
 
             running_loss += loss.item()
 
-            # —— Quick‐Eval：每隔 eval_every 个 batch 做一次 mAP 估计 —— 
             if (step + 1) % eval_every == 0:
                 model.eval()
                 quick_preds = []
@@ -645,7 +630,6 @@ def train_detr_pretrain(
 
         avg_train_loss = running_loss / len(train_loader)
 
-        # —— Epoch 末尾完整验证 —— 
         model.eval()
         val_loss_sum = 0.0
         all_preds = []
@@ -669,7 +653,7 @@ def train_detr_pretrain(
 
         avg_val_loss = val_loss_sum / len(val_loader)
 
-        # 写入 JSON 供 COCOeval 完整评估
+        #写入 JSON 供 COCOeval 完整评估
         preds_json = os.path.join(output_dir, f"predictions_epoch{epoch}.json")
         with open(preds_json, "w") as f:
             json.dump(all_preds, f)
@@ -706,21 +690,19 @@ def train_detr_pretrain(
     print(f"[INFO] Training finished. Last checkpoint → {last_ckpt}")
 
 
-# ============================================
-# 7) Overfit 测试代码（可选，供调试用）
-# ============================================
+#Overfit测试代码（供调试用）
 def run_overfit_debug():
     """
     这段代码和上面 Overfit 训练部分合并示例，方便你跑一次 Overfit，
     可视化 GT vs 预测框，确认 (H,W) 传参已经正确。
     """
-    # —— 1. 复用前面定义的 dataset, processor
+    #复用前面定义的 dataset, processor
     train_img_dir   = "./yolo_dataset/images/train"
     train_label_dir = "./yolo_dataset/labels/train"
     dataset = YoloToDetrDataset(img_dir=train_img_dir, label_dir=train_label_dir, transforms=None)
     processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
 
-    # 2. 筛选前两个“带 motor”的索引
+    #筛选前两个“带 motor”的索引
     pos_indices = []
     for idx, img_path in enumerate(dataset.image_paths):
         rel = os.path.relpath(img_path, dataset.img_dir)
@@ -730,7 +712,7 @@ def run_overfit_debug():
     subset_idx = pos_indices[:2]
     print(f"[Overfit] positive sample indices = {subset_idx}")
 
-    # 3. 构造 Overfit 的小 DataLoader
+    #构造 Overfit的小DataLoader
     repeat_times = 50
     subset_indices = subset_idx * repeat_times
     mini_loader = DataLoader(
@@ -740,7 +722,7 @@ def run_overfit_debug():
         collate_fn=lambda b: detr_collate_fn(b, processor)
     )
 
-    # 4. 初始化 Overfit 用的 DETR
+    #初始化 Overfit 用的 DETR
     model_overfit = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
     num_labels = 1
     model_overfit.config.num_labels = num_labels
@@ -752,7 +734,7 @@ def run_overfit_debug():
 
     optimizer = torch.optim.AdamW(model_overfit.parameters(), lr=1e-5)
 
-    # 5. 辅助：可视化 GT vs 预测
+    #辅助：可视化 GT vs 预测
     def debug_print_preds(model, processor, dataset, subset_idx, epoch, device):
         model.eval()
         for idx in subset_idx:
@@ -788,7 +770,7 @@ def run_overfit_debug():
             plt.close(fig)
             print(f"[Overfit DEBUG] Saved → {save_path}")
 
-    # 6. Overfit 训练循环
+    #Overfit训练循环
     model_overfit.train()
     for epoch in range(1, 51):
         total_loss = 0.0
@@ -806,7 +788,7 @@ def run_overfit_debug():
         avg_loss = total_loss / len(mini_loader)
         print(f"[Overfit] Epoch {epoch:02d}/50 — loss={avg_loss:.5f}")
 
-        # 每 10 轮可视化一次
+        #每 10 轮可视化一次
         if epoch % 10 == 0:
             debug_print_preds(model_overfit, processor, dataset, subset_idx, epoch, device)
 
@@ -814,49 +796,39 @@ def run_overfit_debug():
 
 
 
-
-# ============================================
-# 脚本入口：只需配置下面这几行即可开始预训练
-# ============================================
-# ------------- 5. 主流程 -------------
 if __name__ == "__main__":
-    # 固定随机
+    #固定随机
     random.seed(42)
     np.random.seed(42)
     torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(42)
 
-    # 1) 构建 yolo_dataset
+    #构建 yolo_dataset
     if os.path.exists(YOLO_DATASET_DIR):
         shutil.rmtree(YOLO_DATASET_DIR)
     os.makedirs(YOLO_DATASET_DIR, exist_ok=True)
     build_yolo_dataset(RAW_TRAIN_DIR, RAW_LABELS_CSV, YOLO_DATASET_DIR, val_split=0.2, trust=4, box_size=24)
 
-    # 2) YOLOv8n 预训练
+    #YOLOv8n 预训练
     os.makedirs(YOLO_PRETRAIN_DIR, exist_ok=True)
     yolo_yaml = os.path.join(YOLO_DATASET_DIR, "dataset.yaml")
     yolobest = train_yolov8n_pretrain(yolo_yaml, YOLO_PRETRAIN_WEIGHTS, YOLO_PRETRAIN_DIR)
 
-    # 3) DETR 预训练
+    #DETR 预训练
     os.makedirs(DETR_PRETRAIN_DIR, exist_ok=True)
 
-
-    # —— 先做 Overfit 调试 —— 
     # run_overfit_debug()
     
-    # ------------- 只要改这三行就可以了 -------------
     IMG_DIR    = "./yolo_dataset/images"            # 根目录：会自动递归查找子目录下的 *.jpg/*.png
     LABEL_DIR  = "./yolo_dataset/labels"            # 根目录：会自动递归查找子目录下的 *.txt
     OUTPUT_DIR = "./detr_weights_pretrain/checkpoints"  # 保存 DETR checkpoint 的目录
-    # -----------------------------------------------
 
-    # ------------- 可选超参数：按需调整 -------------
     NUM_EPOCHS    = 20
     BATCH_SIZE    = 4
     LEARNING_RATE = 1e-4
     NUM_WORKERS   = 4
-    SAVE_EVERY    = 5    # 每隔多少个 epoch 保存一次 checkpoint
+    SAVE_EVERY    = 5    #每隔多少个epoch保存一次checkpoint
 
     train_detr_pretrain(
         img_dir=IMG_DIR,
